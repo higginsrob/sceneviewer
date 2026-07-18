@@ -1,0 +1,56 @@
+# Deploy the static Scene Viewer site to GitHub Pages.
+# Repo: https://github.com/higginsrob/sceneviewer
+# Site: https://higginsrob.github.io/sceneviewer/
+#
+# One-time setup (repo Settings → Pages):
+#   Source: GitHub Actions
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -R images objects scenes vendor _site/
+          touch _site/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

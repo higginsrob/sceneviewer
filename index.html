@@ -1,0 +1,2499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three.js Scene Viewer</title>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-V6Y5F2YZ4Q"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-V6Y5F2YZ4Q');
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+    canvas { display: block; }
+    #error {
+      position: fixed; left: 12px; right: 12px; bottom: 12px;
+      color: #fcc; font: 13px/1.4 ui-monospace, monospace;
+      white-space: pre-wrap; pointer-events: none; z-index: 1100;
+    }
+
+    .metal-btn {
+      border: 1.5px solid #1a1a1c;
+      border-radius: 14px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(145deg, #3a3a3c 0%, #1e1e20 35%, #2c2c2e 55%, #141416 80%, #262628 100%);
+      box-shadow:
+        0 4px 14px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      padding: 0;
+      color: #c8c8c6;
+    }
+    .metal-btn:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        0 6px 18px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+    }
+    .metal-btn:active { transform: translateY(0); }
+    .metal-btn svg { display: block; pointer-events: none; }
+    .metal-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    #view-controls {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 1100;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #view-controls .metal-btn {
+      width: 52px;
+      height: 52px;
+      font-size: 18px;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    #view-controls #view-share,
+    #view-controls #view-export {
+      width: auto;
+      min-width: 52px;
+      padding: 0 12px;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    #mode-toggle svg { width: 30px; height: 30px; }
+    #mode-toggle .icon-close { display: none; }
+    body.camera-mode #mode-toggle .icon-camera { display: none; }
+    body.camera-mode #mode-toggle .icon-close { display: block; }
+
+    #gl-canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      transition: filter 0.2s ease;
+    }
+    body.camera-mode #gl-canvas {
+      filter: blur(12px) saturate(1.15) brightness(0.95);
+      transform: scale(1.04);
+      transform-origin: center center;
+    }
+    #viewfinder-sharp {
+      display: none;
+      position: fixed;
+      z-index: 999;
+      pointer-events: none;
+      border-radius: 4px;
+    }
+    body.camera-mode #viewfinder-sharp { display: block; }
+    #camera-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      pointer-events: none;
+      align-items: center;
+      justify-content: center;
+    }
+    body.camera-mode #camera-overlay { display: flex; }
+    #camera-overlay .finder {
+      position: relative;
+      width: min(98vw, calc(100vh * 700 / 920));
+      height: min(100vh, calc(98vw * 920 / 700));
+    }
+    #finder-host,
+    #finder-host svg,
+    #finder-guides,
+    #finder-guides svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #finder-guides {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+    #finder-guides.is-hidden {
+      display: none;
+    }
+
+    /* Keyframe deck — sits on the camera's lower leatherette panel */
+    #camera-kf-ui {
+      display: none;
+      position: absolute;
+      z-index: 2;
+      pointer-events: auto;
+      box-sizing: border-box;
+      padding: 2px 0 0;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+    }
+    body.camera-mode #camera-kf-ui { display: flex; }
+
+    /* ===== Keyframe panel (leather book) ===== */
+    #settings-rail {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 1050;
+      pointer-events: none;
+    }
+    body.camera-mode #settings-rail { display: block; }
+
+    #settings-panel {
+      position: absolute;
+      top: 16px;
+      left: 0;
+      bottom: 16px;
+      width: min(380px, calc(100vw - 72px));
+      transform: translateX(calc(-100% - 8px));
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: none;
+      display: flex;
+      align-items: stretch;
+    }
+    #settings-panel.open {
+      transform: translateX(16px);
+      pointer-events: auto;
+    }
+
+    #settings-panel .book {
+      flex: 1;
+      min-width: 0;
+      border-radius: 18px;
+      border: 1.5px solid #0a0a0a;
+      background:
+        radial-gradient(circle at 20% 15%, #2a2a2a 0.4px, transparent 0.5px) 0 0 / 4px 4px,
+        radial-gradient(circle at 70% 60%, #1e1e1e 0.35px, transparent 0.45px) 0 0 / 4px 4px,
+        linear-gradient(160deg, #1c1c1e 0%, #101012 45%, #0a0a0c 100%);
+      box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 3px 0 0 rgba(255, 255, 255, 0.03);
+      padding: 14px 12px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #settings-panel .paper {
+      flex: 1;
+      min-height: 0;
+      background: linear-gradient(180deg, #f7f4ec 0%, #f0ebe0 100%);
+      border-radius: 10px;
+      border: 1px solid #cfc8b8;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+        0 1px 2px rgba(0, 0, 0, 0.25);
+      overflow: auto;
+      padding: 14px 14px 18px;
+      color: #1a1a1a;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+
+    #settings-panel .paper h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #222;
+      border-bottom: 1px solid #d4cdb8;
+      padding-bottom: 8px;
+    }
+
+    /* Timeline — dark recessed strip on the camera body */
+    #camera-kf-ui .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      width: 100%;
+      height: 100%;
+      justify-content: center;
+    }
+    .timeline-track {
+      position: relative;
+      flex: 1;
+      min-height: 28px;
+      max-height: 40px;
+      border-radius: 6px;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0.04) 0 1px,
+          transparent 1px 8%
+        ),
+        linear-gradient(180deg, #1a1a1c 0%, #0c0c0e 100%);
+      border: 1px solid #050505;
+      box-shadow:
+        inset 0 2px 4px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      cursor: default;
+      overflow: hidden;
+    }
+    .timeline-segment {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    .timeline-segment:nth-child(odd) { background: #3a3a3c; }
+    .timeline-segment:nth-child(even) { background: #2a2a2c; }
+    .timeline-kf {
+      position: absolute;
+      top: 50%;
+      width: 11px;
+      height: 11px;
+      margin-left: -5.5px;
+      margin-top: -5.5px;
+      border-radius: 1px;
+      border: 1.5px solid #6b5600;
+      background: linear-gradient(145deg, #ffe566 0%, #f1c40f 55%, #d4a017 100%);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+      cursor: pointer;
+      z-index: 2;
+      padding: 0;
+      transform: rotate(45deg);
+    }
+    .timeline-kf:hover {
+      background: linear-gradient(145deg, #fff0a0 0%, #f7d94a 55%, #e0b422 100%);
+      transform: rotate(45deg) scale(1.18);
+    }
+    .timeline-kf.active {
+      background: linear-gradient(145deg, #fff38a 0%, #ffdb1a 50%, #f1c40f 100%);
+      border-color: #8a1f14;
+      box-shadow:
+        0 0 0 3px rgba(241, 196, 15, 0.5),
+        0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+    .timeline-playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: #e74c3c;
+      z-index: 3;
+      pointer-events: none;
+      display: none;
+    }
+    .timeline-playhead.visible { display: block; }
+    .timeline-playhead::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: #e74c3c;
+      border-bottom: 0;
+    }
+    .timeline-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: nowrap;
+    }
+    .timeline-toolbar .tool {
+      width: 30px;
+      height: 26px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace;
+      flex-shrink: 0;
+    }
+    .timeline-toolbar .tool-wide {
+      width: auto;
+      padding: 0 8px;
+      font-size: 10px;
+      letter-spacing: 0.02em;
+    }
+    #kf-update {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    #kf-update.dirty {
+      opacity: 1;
+      cursor: pointer;
+      border-color: #6b5600;
+      color: #1a1a1c;
+      background: linear-gradient(145deg, #ffe566 0%, #f1c40f 50%, #d4a017 100%);
+      box-shadow:
+        0 2px 8px rgba(212, 160, 23, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+    #kf-update.dirty:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+    }
+    #kf-guide.is-on {
+      border-color: #4a6a3a;
+      color: #d8e8d0;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.45),
+        inset 0 0 0 1px rgba(120, 180, 90, 0.35);
+    }
+    .timeline-time {
+      margin-left: auto;
+      font: 10px/1 ui-monospace, Menlo, monospace;
+      color: #9a9a98;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+      white-space: nowrap;
+    }
+    .kf-label {
+      font: 11px/1.2 ui-monospace, Menlo, monospace;
+      color: #666;
+      margin: 0 0 10px;
+    }
+
+    #settings-form {
+      display: grid;
+      gap: 12px;
+    }
+    #settings-form fieldset {
+      margin: 0;
+      padding: 0;
+      border: none;
+      display: grid;
+      gap: 8px;
+    }
+    #settings-form legend {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 2px;
+      padding: 0;
+    }
+    #settings-form label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: #333;
+    }
+    #settings-form label.row {
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    #settings-form label.row span { font-size: 12px; }
+    #settings-form input[type="text"],
+    #settings-form input[type="number"],
+    #settings-form select {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #c2bba8;
+      border-radius: 6px;
+      background: #fffdf8;
+      padding: 7px 9px;
+      font: 12px/1.3 ui-monospace, Menlo, monospace;
+      color: #111;
+      outline: none;
+    }
+    #settings-form input:focus,
+    #settings-form select:focus {
+      border-color: #8a8474;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.06);
+    }
+    #settings-form input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #1a1a1c;
+      cursor: pointer;
+    }
+    #settings-form .note {
+      font-size: 10px;
+      color: #777;
+      margin: 0;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+
+    #panel-toggle {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      transform: translate(-4px, -50%);
+      width: 36px;
+      height: 56px;
+      border-radius: 0 12px 12px 0;
+      z-index: 1;
+      pointer-events: auto;
+      transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.15s ease;
+    }
+    #settings-rail:has(#settings-panel.open) #panel-toggle {
+      left: min(380px, calc(100vw - 72px));
+      transform: translate(20px, -50%);
+    }
+    #panel-toggle svg { width: 18px; height: 18px; }
+    #panel-toggle .chev-left { display: none; }
+    #settings-rail:has(#settings-panel.open) #panel-toggle .chev-right { display: none; }
+    #settings-rail:has(#settings-panel.open) #panel-toggle .chev-left { display: block; }
+
+    /* ===== Export video dialog ===== */
+    #export-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(4px);
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    #export-modal.open {
+      display: flex;
+    }
+    #export-modal[hidden] {
+      display: none !important;
+    }
+    #export-modal .book {
+      width: min(380px, 100%);
+      border-radius: 18px;
+      border: 1.5px solid #0a0a0a;
+      background:
+        radial-gradient(circle at 20% 15%, #2a2a2a 0.4px, transparent 0.5px) 0 0 / 4px 4px,
+        radial-gradient(circle at 70% 60%, #1e1e1e 0.35px, transparent 0.45px) 0 0 / 4px 4px,
+        linear-gradient(160deg, #1c1c1e 0%, #101012 45%, #0a0a0c 100%);
+      box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      padding: 14px;
+    }
+    #export-modal .paper {
+      background: linear-gradient(180deg, #f7f4ec 0%, #f0ebe0 100%);
+      border-radius: 10px;
+      border: 1px solid #cfc8b8;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+        0 1px 2px rgba(0, 0, 0, 0.25);
+      padding: 14px 14px 16px;
+      color: #1a1a1a;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+    #export-modal .paper h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #222;
+      border-bottom: 1px solid #d4cdb8;
+      padding-bottom: 8px;
+    }
+    #export-form {
+      display: grid;
+      gap: 12px;
+    }
+    #export-form fieldset {
+      margin: 0;
+      padding: 0;
+      border: none;
+      display: grid;
+      gap: 8px;
+    }
+    #export-form legend {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 2px;
+      padding: 0;
+    }
+    #export-form label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: #333;
+    }
+    #export-form select {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #c2bba8;
+      border-radius: 6px;
+      background: #fffdf8;
+      padding: 7px 9px;
+      font: 12px/1.3 ui-monospace, Menlo, monospace;
+      color: #111;
+      outline: none;
+    }
+    #export-form select:focus {
+      border-color: #8a8474;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.06);
+    }
+    #export-form select:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    #export-summary {
+      font: 11px/1.4 ui-monospace, Menlo, monospace;
+      color: #666;
+      margin: 0;
+    }
+    #export-progress-wrap {
+      display: none;
+      gap: 6px;
+    }
+    #export-progress-wrap.visible {
+      display: grid;
+    }
+    #export-progress-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: #ddd6c6;
+      overflow: hidden;
+    }
+    #export-progress-bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3a3a3c, #1a1a1c);
+      transition: width 0.08s linear;
+    }
+    #export-status {
+      font: 11px/1.3 ui-monospace, Menlo, monospace;
+      color: #555;
+      margin: 0;
+    }
+    #export-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    #export-actions .metal-btn {
+      width: auto;
+      min-width: 88px;
+      height: 36px;
+      padding: 0 14px;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    #export-actions .btn-primary {
+      color: #1a1a1c;
+      border-color: #6b5600;
+      background: linear-gradient(145deg, #ffe566 0%, #f1c40f 50%, #d4a017 100%);
+      box-shadow:
+        0 2px 8px rgba(212, 160, 23, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.min.js",
+      "three/addons/": "./vendor/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="error"></div>
+
+  <div id="view-controls">
+    <button id="view-share" class="metal-btn" type="button" aria-label="Copy share link" title="Copy share link for this frame">Share</button>
+    <button id="view-export" class="metal-btn" type="button" aria-label="Export video" title="Export video">Export</button>
+    <button id="view-play" class="metal-btn" type="button" aria-label="Play keyframes" title="Play">▶</button>
+    <button id="view-stop" class="metal-btn" type="button" aria-label="Stop keyframes" title="Stop">■</button>
+    <button id="mode-toggle" class="metal-btn" type="button" aria-label="Toggle camera view" title="Camera view">
+      <svg class="icon-camera" viewBox="0 0 48 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="mt-metal" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#3a3a3c"/>
+            <stop offset="45%" stop-color="#1e1e20"/>
+            <stop offset="100%" stop-color="#2c2c2e"/>
+          </linearGradient>
+          <linearGradient id="mt-cyl" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0a0a0a"/>
+            <stop offset="45%" stop-color="#4a4a4c"/>
+            <stop offset="100%" stop-color="#080808"/>
+          </linearGradient>
+          <linearGradient id="mt-body" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2a2a2c"/>
+            <stop offset="100%" stop-color="#0e0e10"/>
+          </linearGradient>
+        </defs>
+        <rect x="16" y="2" width="16" height="12" rx="2" fill="url(#mt-cyl)" stroke="#000" stroke-width="1"/>
+        <rect x="16" y="8" width="16" height="3" fill="#2e2e30"/>
+        <rect x="6" y="12" width="36" height="40" rx="7" fill="url(#mt-body)" stroke="#050505" stroke-width="1.25"/>
+        <rect x="10" y="16" width="28" height="28" rx="3" fill="url(#mt-metal)" stroke="#000" stroke-width="1"/>
+        <rect x="13" y="19" width="22" height="22" rx="2" fill="#0a0a0a" stroke="#333" stroke-width="0.75"/>
+        <circle cx="24" cy="30" r="4" fill="none" stroke="#888" stroke-width="1"/>
+        <rect x="12" y="46" width="24" height="4" rx="1.5" fill="#121212"/>
+      </svg>
+      <svg class="icon-close" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="mt-x" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#c8c8c6"/>
+            <stop offset="100%" stop-color="#8a8a88"/>
+          </linearGradient>
+        </defs>
+        <path d="M14 14 L34 34 M34 14 L14 34" stroke="url(#mt-x)" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-title" hidden>
+    <div class="book">
+      <div class="paper">
+        <h2 id="export-title">Export Video</h2>
+        <form id="export-form" autocomplete="off">
+          <fieldset>
+            <legend>Settings</legend>
+            <label>Aspect ratio
+              <select name="aspect" id="export-aspect">
+                <option value="16:9" selected>16:9</option>
+                <option value="9:16">9:16</option>
+                <option value="1:1">1:1</option>
+                <option value="4:3">4:3</option>
+              </select>
+            </label>
+            <label>Resolution
+              <select name="resolution" id="export-resolution"></select>
+            </label>
+            <label>Frames per second
+              <select name="fps" id="export-fps">
+                <option value="24">24</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+              </select>
+            </label>
+          </fieldset>
+          <p id="export-summary">—</p>
+          <div id="export-progress-wrap">
+            <div id="export-progress-bar" aria-hidden="true"><span></span></div>
+            <p id="export-status">Ready</p>
+          </div>
+          <div id="export-actions">
+            <button type="button" class="metal-btn" id="export-cancel">Cancel</button>
+            <button type="submit" class="metal-btn btn-primary" id="export-start">Export</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-rail">
+    <aside id="settings-panel" aria-label="Keyframe editor">
+      <div class="book">
+        <div class="paper">
+          <h2>Keyframe</h2>
+          <p class="kf-label" id="kf-label">Keyframe 1 of 1</p>
+
+          <form id="settings-form" autocomplete="off">
+            <fieldset>
+              <legend>Timing</legend>
+              <label>Duration (sec)
+                <input name="duration" type="number" min="0" max="120" step="0.1" value="2">
+              </label>
+              <label>Easing (into this KF)
+                <select name="easing">
+                  <option value="linear">linear</option>
+                  <option value="ease-in">ease-in</option>
+                  <option value="ease-out">ease-out</option>
+                </select>
+              </label>
+              <p class="note">KF1 duration is an opening hold. Later KFs: transition time from previous.</p>
+            </fieldset>
+
+            <fieldset>
+              <legend>Scene</legend>
+              <label>Scene preset
+                <select name="scenePreset"></select>
+              </label>
+              <label>Scene URL
+                <input name="scene" type="text" spellcheck="false">
+              </label>
+              <label>Object preset
+                <select name="targetPreset"></select>
+              </label>
+              <label>Target URL
+                <input name="target" type="text" spellcheck="false">
+              </label>
+              <p class="note">Presets fill the URL fields. URLs snap instantly when a keyframe is reached.</p>
+            </fieldset>
+
+            <fieldset>
+              <legend>Target</legend>
+              <label>Position (x,y,z)
+                <input name="targetPosition" type="text" spellcheck="false">
+              </label>
+              <label>Scale
+                <input name="targetScale" type="text" spellcheck="false">
+              </label>
+              <label>Rotation (x,y,z)
+                <input name="targetRotation" type="text" spellcheck="false">
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>Camera</legend>
+              <label>Position (x,y,z)
+                <input name="cameraPosition" type="text" spellcheck="false">
+              </label>
+              <label>FOV
+                <input name="fov" type="number" min="10" max="120" step="1">
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>Rendering</legend>
+              <label class="row">
+                <span>Shadows</span>
+                <input name="shadows" type="checkbox">
+              </label>
+            </fieldset>
+          </form>
+        </div>
+      </div>
+    </aside>
+    <button id="panel-toggle" class="metal-btn" type="button" aria-label="Toggle keyframe panel" title="Keyframes">
+      <svg class="chev-right" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M9 6 L15 12 L9 18" fill="none" stroke="#c8c8c6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <svg class="chev-left" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M15 6 L9 12 L15 18" fill="none" stroke="#c8c8c6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <canvas id="viewfinder-sharp"></canvas>
+
+  <div id="camera-overlay">
+    <div class="finder" id="finder-shell">
+      <div id="finder-host"></div>
+      <div id="finder-guides" aria-hidden="true"></div>
+      <!-- Positioned over lower leatherette (SVG viewBox space) -->
+      <div id="camera-kf-ui" aria-label="Keyframe timeline on camera">
+        <div class="timeline">
+          <div class="timeline-track" id="timeline-track">
+            <div class="timeline-playhead" id="timeline-playhead"></div>
+          </div>
+          <div class="timeline-toolbar">
+            <button type="button" class="metal-btn tool" id="kf-play" title="Play">▶</button>
+            <button type="button" class="metal-btn tool" id="kf-stop" title="Stop">■</button>
+            <button type="button" class="metal-btn tool tool-wide" id="kf-add" title="Add keyframe">+ KF</button>
+            <button type="button" class="metal-btn tool tool-wide" id="kf-update" title="Record current camera into selected keyframe" disabled>Update</button>
+            <button type="button" class="metal-btn tool tool-wide" id="kf-guide" title="Toggle composition guides" aria-pressed="true">Guide</button>
+            <button type="button" class="metal-btn tool" id="kf-del" title="Delete keyframe">✕</button>
+            <span class="timeline-time" id="timeline-time">0.0 / 0.0s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    function trackButton(button, extra = {}) {
+      if (typeof gtag !== 'function' || !button) return;
+      const id = button.id || button.dataset.gaId || 'unnamed';
+      const label = (
+        button.getAttribute('aria-label')
+        || button.title
+        || button.textContent
+        || id
+      ).trim().replace(/\s+/g, ' ');
+      gtag('event', 'button_click', {
+        button_id: id,
+        button_label: label,
+        ...extra,
+      });
+    }
+
+    // Capture clicks for every button (including dynamically created timeline KFs)
+    document.addEventListener('click', (e) => {
+      const button = e.target.closest('button');
+      if (!button || button.disabled) return;
+      const extra = {};
+      if (button.classList.contains('timeline-kf') && button.dataset.kfIndex != null) {
+        extra.keyframe_index = Number(button.dataset.kfIndex);
+      }
+      trackButton(button, extra);
+    }, true);
+
+    const VF_VIEWBOX = { w: 700, h: 920 };
+    const VF_HOLE = { x: 140, y: 168, w: 420, h: 420 };
+    // Lower leatherette deck — keep in sync with camera-viewfinder-overlay.svg
+    const VF_KF_DECK = { x: 148, y: 658, w: 404, h: 118 };
+    const EASINGS = new Set(['linear', 'ease-in', 'ease-out']);
+
+    // Add entries here as bundled assets grow; selects are filled from these lists.
+    const SCENE_PRESETS = [
+      { label: 'Studio', url: './scenes/studio.json' },
+      { label: 'Noon', url: './scenes/noon.json' },
+      { label: 'Dusk', url: './scenes/dusk.json' },
+      { label: 'Night', url: './scenes/night.json' },
+      { label: 'Overcast', url: './scenes/overcast.json' },
+    ];
+    const OBJECT_PRESETS = [
+      { label: 'Example', url: './objects/example.glb' },
+    ];
+
+    function fillPresetSelect(selectEl, presets, { emptyLabel, emptyValue = '' }) {
+      selectEl.replaceChildren();
+      const empty = document.createElement('option');
+      empty.value = emptyValue;
+      empty.textContent = emptyLabel;
+      selectEl.appendChild(empty);
+      for (const preset of presets) {
+        const opt = document.createElement('option');
+        opt.value = preset.url;
+        opt.textContent = preset.label;
+        selectEl.appendChild(opt);
+      }
+    }
+
+    function syncPresetSelect(selectEl, url, presets) {
+      const value = String(url || '').trim();
+      const hit = presets.some((p) => p.url === value);
+      const custom = selectEl.querySelector('option[data-custom]');
+
+      if (hit || value === '') {
+        custom?.remove();
+        selectEl.value = value;
+        return;
+      }
+
+      // Keep a transient Custom option for URLs that aren't in the preset list.
+      let opt = custom;
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.dataset.custom = '1';
+        opt.textContent = 'Custom…';
+        selectEl.insertBefore(opt, selectEl.firstChild);
+      }
+      opt.value = value;
+      selectEl.value = value;
+    }
+
+    const errorEl = document.getElementById('error');
+    const sharpCanvas = document.getElementById('viewfinder-sharp');
+    const modeToggle = document.getElementById('mode-toggle');
+    const viewShareBtn = document.getElementById('view-share');
+    const viewExportBtn = document.getElementById('view-export');
+    const viewPlayBtn = document.getElementById('view-play');
+    const viewStopBtn = document.getElementById('view-stop');
+    const exportModal = document.getElementById('export-modal');
+    const exportForm = document.getElementById('export-form');
+    const exportAspectEl = document.getElementById('export-aspect');
+    const exportResolutionEl = document.getElementById('export-resolution');
+    const exportFpsEl = document.getElementById('export-fps');
+    const exportSummaryEl = document.getElementById('export-summary');
+    const exportProgressWrap = document.getElementById('export-progress-wrap');
+    const exportProgressBar = document.querySelector('#export-progress-bar > span');
+    const exportStatusEl = document.getElementById('export-status');
+    const exportCancelBtn = document.getElementById('export-cancel');
+    const exportStartBtn = document.getElementById('export-start');
+    const settingsPanel = document.getElementById('settings-panel');
+    const panelToggle = document.getElementById('panel-toggle');
+    const settingsForm = document.getElementById('settings-form');
+    const cameraKfUi = document.getElementById('camera-kf-ui');
+    const timelineTrack = document.getElementById('timeline-track');
+    const timelinePlayhead = document.getElementById('timeline-playhead');
+    const timelineTime = document.getElementById('timeline-time');
+    const kfLabel = document.getElementById('kf-label');
+    const kfPlayBtn = document.getElementById('kf-play');
+    const kfStopBtn = document.getElementById('kf-stop');
+    const kfAddBtn = document.getElementById('kf-add');
+    const kfUpdateBtn = document.getElementById('kf-update');
+    const kfGuideBtn = document.getElementById('kf-guide');
+    const kfDelBtn = document.getElementById('kf-del');
+    const finderGuides = document.getElementById('finder-guides');
+
+    function showError(err) {
+      console.error(err);
+      errorEl.textContent = String(err?.stack || err);
+    }
+
+    function parseBool(str, fallback = false) {
+      if (str == null || str === '') return fallback;
+      const v = String(str).toLowerCase();
+      if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+      if (['0', 'false', 'no', 'off'].includes(v)) return false;
+      return fallback;
+    }
+
+    function parseVec3(str, fallback = [0, 0, 0]) {
+      if (!str) return new THREE.Vector3(...fallback);
+      const parts = String(str).split(',').map((p) => Number(p.trim()));
+      return new THREE.Vector3(
+        Number.isFinite(parts[0]) ? parts[0] : fallback[0],
+        Number.isFinite(parts[1]) ? parts[1] : fallback[1],
+        Number.isFinite(parts[2]) ? parts[2] : fallback[2],
+      );
+    }
+
+    function parseScale(str) {
+      if (!str) return new THREE.Vector3(1, 1, 1);
+      const parts = String(str).split(',').map((p) => Number(p.trim()));
+      if (parts.length === 1 && Number.isFinite(parts[0])) {
+        return new THREE.Vector3(parts[0], parts[0], parts[0]);
+      }
+      return new THREE.Vector3(
+        Number.isFinite(parts[0]) ? parts[0] : 1,
+        Number.isFinite(parts[1]) ? parts[1] : 1,
+        Number.isFinite(parts[2]) ? parts[2] : 1,
+      );
+    }
+
+    function fmtVec3(v, digits = 4) {
+      const n = (x) => {
+        const r = Number(Number(x).toFixed(digits));
+        return Object.is(r, -0) ? 0 : r;
+      };
+      return `${n(v.x)},${n(v.y)},${n(v.z)}`;
+    }
+
+    function fmtScale(v) {
+      if (Math.abs(v.x - v.y) < 1e-6 && Math.abs(v.y - v.z) < 1e-6) {
+        const r = Number(v.x.toFixed(4));
+        return String(Object.is(r, -0) ? 0 : r);
+      }
+      return fmtVec3(v);
+    }
+
+    function vec3ToArr(v) {
+      return [v.x, v.y, v.z];
+    }
+
+    function arrToVec3(a, fallback = [0, 0, 0]) {
+      if (!Array.isArray(a)) return new THREE.Vector3(...fallback);
+      return new THREE.Vector3(
+        Number.isFinite(a[0]) ? a[0] : fallback[0],
+        Number.isFinite(a[1]) ? a[1] : fallback[1],
+        Number.isFinite(a[2]) ? a[2] : fallback[2],
+      );
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function lerpAngle(a, b, t) {
+      let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+      if (d < -Math.PI) d += Math.PI * 2;
+      return a + d * t;
+    }
+
+    function applyEasing(t, easing) {
+      const x = THREE.MathUtils.clamp(t, 0, 1);
+      if (easing === 'ease-in') return x * x;
+      if (easing === 'ease-out') return 1 - (1 - x) * (1 - x);
+      return x;
+    }
+
+    function cloneKeyframe(kf) {
+      return JSON.parse(JSON.stringify(kf));
+    }
+
+    function normalizeKeyframe(raw, fallbackCam = [0, 5, 10]) {
+      const fov = Number(raw?.fov);
+      const duration = Number(raw?.duration);
+      const easing = EASINGS.has(raw?.easing) ? raw.easing : 'linear';
+      return {
+        sceneUrl: String(raw?.sceneUrl || './scenes/studio.json'),
+        targetUrl: String(raw?.targetUrl || ''),
+        targetPosition: vec3ToArr(arrToVec3(raw?.targetPosition)),
+        targetScale: vec3ToArr(arrToVec3(raw?.targetScale, [1, 1, 1])),
+        targetRotation: vec3ToArr(arrToVec3(raw?.targetRotation)),
+        cameraPosition: vec3ToArr(arrToVec3(raw?.cameraPosition, fallbackCam)),
+        orbit: {
+          distance: Number.isFinite(raw?.orbit?.distance) ? raw.orbit.distance : null,
+          azimuthAngle: Number.isFinite(raw?.orbit?.azimuthAngle) ? raw.orbit.azimuthAngle : null,
+          polarAngle: Number.isFinite(raw?.orbit?.polarAngle) ? raw.orbit.polarAngle : null,
+        },
+        fov: Number.isFinite(fov) ? THREE.MathUtils.clamp(fov, 10, 120) : 50,
+        shadows: !!raw?.shadows,
+        duration: Number.isFinite(duration) ? Math.max(0, duration) : 2,
+        easing,
+      };
+    }
+
+    function keyframeFromFlatParams(p) {
+      return normalizeKeyframe({
+        sceneUrl: p.sceneUrl,
+        targetUrl: p.targetUrl,
+        targetPosition: vec3ToArr(p.targetPosition),
+        targetScale: vec3ToArr(p.targetScale),
+        targetRotation: vec3ToArr(p.targetRotation),
+        cameraPosition: vec3ToArr(p.cameraPosition),
+        fov: p.fov,
+        shadows: p.shadows,
+        duration: 2,
+        easing: 'linear',
+      });
+    }
+
+    function readFlatParamsFromUrl() {
+      const q = new URLSearchParams(location.search);
+      const fov = Number(q.get('fov'));
+      return {
+        sceneUrl: q.get('scene') || './scenes/studio.json',
+        targetUrl: q.get('target') || '',
+        targetPosition: parseVec3(q.get('targetPosition') || q.get('position')),
+        targetScale: parseScale(q.get('targetScale') || q.get('scale')),
+        targetRotation: parseVec3(q.get('targetRotation') || q.get('rotation')),
+        cameraPosition: parseVec3(q.get('cameraPosition') || q.get('camera'), [0, 5, 10]),
+        zoomMode: q.get('zoom') === 'camera' ? 'camera' : 'fullscreen',
+        // Viewer-only (not stored on keyframes)
+        guide: parseBool(q.get('guide'), true),
+        fov: Number.isFinite(fov) ? THREE.MathUtils.clamp(fov, 10, 120) : 50,
+        shadows: parseBool(q.get('shadows'), false),
+      };
+    }
+
+    function loadKeyframesFromUrl() {
+      const q = new URLSearchParams(location.search);
+      const flat = readFlatParamsFromUrl();
+      const raw = q.get('keyframes');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) {
+            return parsed.map((k) => normalizeKeyframe(k, vec3ToArr(flat.cameraPosition)));
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+      return [keyframeFromFlatParams(flat)];
+    }
+
+    function totalDuration(keyframes) {
+      return keyframes.reduce((s, k) => s + Math.max(0, k.duration), 0);
+    }
+
+    /** Cumulative start time of each keyframe pose on the timeline. */
+    function keyframeStartTimes(keyframes) {
+      const starts = [];
+      let t = 0;
+      for (let i = 0; i < keyframes.length; i++) {
+        starts.push(t);
+        t += Math.max(0, keyframes[i].duration);
+      }
+      return starts;
+    }
+
+    function isUiEventTarget(el) {
+      return !!el?.closest?.(
+        '#settings-rail, #view-controls, #camera-kf-ui, #settings-form, #export-modal, button, input, select, textarea, label',
+      );
+    }
+
+    const EXPORT_ASPECTS = {
+      '16:9': 16 / 9,
+      '9:16': 9 / 16,
+      '1:1': 1,
+      '4:3': 4 / 3,
+    };
+    const EXPORT_SHORT_EDGES = [720, 1080, 2160];
+
+    function exportSizeFor(aspectKey, shortEdge) {
+      const r = EXPORT_ASPECTS[aspectKey] || (16 / 9);
+      if (r >= 1) {
+        return { width: Math.round(shortEdge * r), height: shortEdge };
+      }
+      return { width: shortEdge, height: Math.round(shortEdge / r) };
+    }
+
+    function pickWebmMimeType() {
+      const candidates = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+      ];
+      if (typeof MediaRecorder === 'undefined') return '';
+      for (const type of candidates) {
+        if (MediaRecorder.isTypeSupported(type)) return type;
+      }
+      return '';
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+
+    function nextAnimationFrame() {
+      return new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+
+    function waitMs(ms) {
+      if (ms <= 0) return Promise.resolve();
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    /** Map the on-camera keyframe deck to the lower leatherette in SVG space. */
+    function layoutCameraKfUi() {
+      const shell = document.getElementById('finder-shell');
+      if (!shell || !cameraKfUi) return;
+      const sx = shell.clientWidth / VF_VIEWBOX.w;
+      const sy = shell.clientHeight / VF_VIEWBOX.h;
+      cameraKfUi.style.left = `${VF_KF_DECK.x * sx}px`;
+      cameraKfUi.style.top = `${VF_KF_DECK.y * sy}px`;
+      cameraKfUi.style.width = `${VF_KF_DECK.w * sx}px`;
+      cameraKfUi.style.height = `${VF_KF_DECK.h * sy}px`;
+    }
+
+    function applyRendererSettings(renderer, { shadows, project }) {
+      renderer.shadowMap.enabled = shadows;
+      renderer.shadowMap.type = project?.shadowType ?? THREE.PCFSoftShadowMap;
+      if (project?.toneMapping != null) renderer.toneMapping = project.toneMapping;
+      if (project?.toneMappingExposure != null) {
+        renderer.toneMappingExposure = project.toneMappingExposure;
+      }
+    }
+
+    function applySceneShadows(root, enabled) {
+      root.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = enabled;
+          obj.receiveShadow = enabled;
+        }
+        if (obj.isDirectionalLight || obj.isSpotLight || obj.isPointLight) {
+          obj.castShadow = enabled;
+          if (enabled && obj.shadow) {
+            if (obj.shadow.mapSize.x < 1024) obj.shadow.mapSize.set(2048, 2048);
+            obj.shadow.bias = obj.shadow.bias || -0.0002;
+          }
+        }
+      });
+    }
+
+    async function loadEditorScene(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to load scene ${url}: ${res.status}`);
+      const data = await res.json();
+      const objectJson = data.scene?.object ? data.scene : data;
+      const loader = new THREE.ObjectLoader();
+      const root = loader.parse(objectJson);
+      let scene;
+      if (root.isScene) scene = root;
+      else {
+        scene = new THREE.Scene();
+        scene.add(root);
+      }
+      return { scene, project: data.project || null };
+    }
+
+    function loadGlb(url) {
+      const loader = new GLTFLoader();
+      return new Promise((resolve, reject) => {
+        loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+      });
+    }
+
+    function targetCenter(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (box.isEmpty()) return obj.position.clone();
+      return box.getCenter(new THREE.Vector3());
+    }
+
+    function placeOnGround(obj) {
+      obj.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(obj);
+      if (box.isEmpty()) return;
+      obj.position.y += -box.min.y;
+      obj.updateMatrixWorld(true);
+    }
+
+    function setOrbitFromPositions(orbit, camPos, lookAtPos) {
+      const offset = new THREE.Vector3().subVectors(camPos, lookAtPos);
+      const r = offset.length();
+      if (r < 1e-6) return;
+      orbit.distance = THREE.MathUtils.clamp(r, 1, 20);
+      orbit.polarAngle = THREE.MathUtils.clamp(
+        Math.acos(THREE.MathUtils.clamp(offset.y / r, -1, 1)),
+        0.2,
+        Math.PI / 2 - 0.1,
+      );
+      orbit.azimuthAngle = Math.atan2(offset.z, offset.x);
+    }
+
+    function getViewfinderScreenRect() {
+      const svg = document.querySelector('#finder-host svg');
+      if (svg) {
+        const bbox = svg.getBoundingClientRect();
+        const sx = bbox.width / VF_VIEWBOX.w;
+        const sy = bbox.height / VF_VIEWBOX.h;
+        return {
+          x: bbox.left + VF_HOLE.x * sx,
+          y: bbox.top + VF_HOLE.y * sy,
+          w: VF_HOLE.w * sx,
+          h: VF_HOLE.h * sy,
+        };
+      }
+      const scale = Math.min((innerWidth * 0.98) / VF_VIEWBOX.w, innerHeight / VF_VIEWBOX.h);
+      const finderW = VF_VIEWBOX.w * scale;
+      const finderH = VF_VIEWBOX.h * scale;
+      const finderLeft = (innerWidth - finderW) / 2;
+      const finderTop = (innerHeight - finderH) / 2;
+      return {
+        x: finderLeft + VF_HOLE.x * scale,
+        y: finderTop + VF_HOLE.y * scale,
+        w: VF_HOLE.w * scale,
+        h: VF_HOLE.h * scale,
+      };
+    }
+
+    function layoutSharpViewfinder(vfRenderer) {
+      const rect = getViewfinderScreenRect();
+      sharpCanvas.style.left = `${rect.x}px`;
+      sharpCanvas.style.top = `${rect.y}px`;
+      sharpCanvas.style.width = `${rect.w}px`;
+      sharpCanvas.style.height = `${rect.h}px`;
+      if (vfRenderer) {
+        vfRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        vfRenderer.setSize(rect.w, rect.h, false);
+      }
+      layoutCameraKfUi();
+      return rect;
+    }
+
+    function setCameraModeUI(enabled) {
+      document.body.classList.toggle('camera-mode', enabled);
+      modeToggle.setAttribute('aria-label', enabled ? 'Exit camera view' : 'Toggle camera view');
+      modeToggle.title = enabled ? 'Exit camera view' : 'Camera view';
+      if (!enabled) settingsPanel.classList.remove('open');
+    }
+
+    function setPanelOpen(open) {
+      settingsPanel.classList.toggle('open', open);
+      panelToggle.setAttribute('aria-label', open ? 'Close keyframe panel' : 'Open keyframe panel');
+      panelToggle.title = open ? 'Close keyframes' : 'Keyframes';
+    }
+
+    function containDistanceForAspect(canonicalDistance, aspect) {
+      return canonicalDistance * Math.max(1, 1 / aspect);
+    }
+
+    async function init() {
+      const keyframes = loadKeyframesFromUrl();
+      let selectedIndex = Math.max(
+        0,
+        Math.min(keyframes.length - 1, Number(new URLSearchParams(location.search).get('kf')) || 0),
+      );
+
+      const playback = {
+        playing: false,
+        time: 0,
+        lastTs: 0,
+        lastDiscreteIndex: -1,
+      };
+      const exportJob = {
+        active: false,
+        cancelRequested: false,
+      };
+      let cameraDirty = false;
+
+      function setCameraDirty(dirty) {
+        cameraDirty = dirty && !playback.playing;
+        kfUpdateBtn.disabled = !cameraDirty;
+        kfUpdateBtn.classList.toggle('dirty', cameraDirty);
+        kfUpdateBtn.title = cameraDirty
+          ? 'Record current camera into selected keyframe'
+          : 'Orbit or zoom to change the camera, then Update';
+      }
+
+      // Live params: pose from keyframes + viewer-only zoomMode from URL
+      const urlFlat = readFlatParamsFromUrl();
+      const params = {
+        sceneUrl: keyframes[selectedIndex].sceneUrl,
+        targetUrl: keyframes[selectedIndex].targetUrl,
+        targetPosition: arrToVec3(keyframes[selectedIndex].targetPosition),
+        targetScale: arrToVec3(keyframes[selectedIndex].targetScale, [1, 1, 1]),
+        targetRotation: arrToVec3(keyframes[selectedIndex].targetRotation),
+        cameraPosition: arrToVec3(keyframes[selectedIndex].cameraPosition, [0, 5, 10]),
+        zoomMode: urlFlat.zoomMode,
+        fov: keyframes[selectedIndex].fov,
+        shadows: keyframes[selectedIndex].shadows,
+      };
+
+      const freeLookAt = new THREE.Vector3(0, 0, 0);
+      let scene = null;
+      let project = null;
+      let target = null;
+      let loadedSceneUrl = '';
+      let loadedTargetUrl = '';
+
+      const overlayRes = await fetch('./images/camera-viewfinder-overlay.svg');
+      if (!overlayRes.ok) throw new Error('Failed to load camera overlay SVG');
+      document.getElementById('finder-host').innerHTML = await overlayRes.text();
+
+      const guidesRes = await fetch('./images/camera-viewfinder-guides.svg');
+      if (!guidesRes.ok) throw new Error('Failed to load camera guides SVG');
+      finderGuides.innerHTML = await guidesRes.text();
+
+      let guidesVisible = urlFlat.guide;
+      function setGuidesVisible(on, { writeUrl = false } = {}) {
+        guidesVisible = on;
+        finderGuides.classList.toggle('is-hidden', !on);
+        kfGuideBtn.classList.toggle('is-on', on);
+        kfGuideBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        kfGuideBtn.title = on ? 'Hide composition guides' : 'Show composition guides';
+        if (writeUrl) writeUrlFromState();
+      }
+      setGuidesVisible(guidesVisible);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.domElement.id = 'gl-canvas';
+      document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+      const vfRenderer = new THREE.WebGLRenderer({
+        canvas: sharpCanvas,
+        antialias: true,
+        alpha: false,
+      });
+      const vfCamera = new THREE.PerspectiveCamera(params.fov, 1, 0.1, 10000);
+      const bgCamera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 10000);
+      const camera = new THREE.PerspectiveCamera(params.fov, innerWidth / innerHeight, 0.1, 10000);
+
+      const orbitControls = {
+        enabled: true,
+        distance: 5,
+        azimuthAngle: 0,
+        polarAngle: Math.PI / 4,
+        lastX: 0,
+        lastY: 0,
+        isDragging: false,
+        zoomSpeed: 0.18,
+      };
+
+      layoutSharpViewfinder(vfRenderer);
+
+      function lookAtPoint() {
+        if (target) return targetCenter(target);
+        return freeLookAt;
+      }
+
+      function captureOrbitIntoKeyframe(kf) {
+        kf.orbit = {
+          distance: orbitControls.distance,
+          azimuthAngle: orbitControls.azimuthAngle,
+          polarAngle: orbitControls.polarAngle,
+        };
+        kf.cameraPosition = vec3ToArr(canonicalCameraPosition());
+      }
+
+      function applyOrbitFromKeyframe(kf) {
+        const lookAt = lookAtPoint();
+        if (
+          kf.orbit
+          && Number.isFinite(kf.orbit.distance)
+          && Number.isFinite(kf.orbit.azimuthAngle)
+          && Number.isFinite(kf.orbit.polarAngle)
+        ) {
+          orbitControls.distance = kf.orbit.distance;
+          orbitControls.azimuthAngle = kf.orbit.azimuthAngle;
+          orbitControls.polarAngle = kf.orbit.polarAngle;
+        } else {
+          setOrbitFromPositions(orbitControls, arrToVec3(kf.cameraPosition, [0, 5, 10]), lookAt);
+          captureOrbitIntoKeyframe(kf);
+        }
+      }
+
+      function canonicalCameraPosition() {
+        const lookAt = lookAtPoint();
+        const r = orbitControls.distance;
+        const phi = orbitControls.polarAngle;
+        const theta = orbitControls.azimuthAngle;
+        return new THREE.Vector3(
+          lookAt.x + r * Math.sin(phi) * Math.cos(theta),
+          lookAt.y + r * Math.cos(phi),
+          lookAt.z + r * Math.sin(phi) * Math.sin(theta),
+        );
+      }
+
+      function applyShadowsSetting() {
+        applyRendererSettings(renderer, { shadows: params.shadows, project });
+        applyRendererSettings(vfRenderer, { shadows: params.shadows, project });
+        if (scene) applySceneShadows(scene, params.shadows);
+        if (target) applySceneShadows(target, params.shadows);
+      }
+
+      function applyTargetTransformFromParams() {
+        if (!target) return;
+        target.scale.copy(params.targetScale);
+        target.rotation.set(
+          params.targetRotation.x,
+          params.targetRotation.y,
+          params.targetRotation.z,
+        );
+        target.position.set(params.targetPosition.x, 0, params.targetPosition.z);
+        placeOnGround(target);
+        target.position.x = params.targetPosition.x;
+        target.position.z = params.targetPosition.z;
+      }
+
+      async function ensureSceneLoaded(url) {
+        if (url === loadedSceneUrl && scene) return;
+        const loaded = await loadEditorScene(url);
+        // Replace scene contents carefully: keep same scene ref if possible
+        if (scene && target) scene.remove(target);
+        scene = loaded.scene;
+        project = loaded.project;
+        loadedSceneUrl = url;
+        if (target) {
+          scene.add(target);
+        }
+        applyShadowsSetting();
+      }
+
+      async function ensureTargetLoaded(url) {
+        if (url === loadedTargetUrl) return;
+        if (target && scene) scene.remove(target);
+        target = null;
+        loadedTargetUrl = url;
+        if (!url) return;
+        target = await loadGlb(url);
+        scene.add(target);
+        applyTargetTransformFromParams();
+        applySceneShadows(target, params.shadows);
+      }
+
+      function syncModeBundle() {
+        const inCamera = params.zoomMode === 'camera';
+        setCameraModeUI(inCamera);
+        orbitControls.enabled = !playback.playing;
+        if (inCamera) {
+          layoutSharpViewfinder(vfRenderer);
+          applyViewfinderOrbit();
+          applyTopDownBackground();
+        } else {
+          applyFullscreenFit();
+        }
+      }
+
+      function applyViewfinderOrbit() {
+        const lookAt = lookAtPoint();
+        const pos = canonicalCameraPosition();
+        vfCamera.position.copy(pos);
+        vfCamera.up.set(0, 1, 0);
+        vfCamera.lookAt(lookAt);
+        vfCamera.fov = params.fov;
+        vfCamera.aspect = 1;
+        vfCamera.near = 0.1;
+        vfCamera.far = 10000;
+        vfCamera.updateProjectionMatrix();
+      }
+
+      function applyFullscreenFit() {
+        applyCameraForAspect(innerWidth / innerHeight);
+      }
+
+      function applyCameraForAspect(aspect) {
+        const lookAt = lookAtPoint();
+        const dist = containDistanceForAspect(orbitControls.distance, aspect);
+        const phi = orbitControls.polarAngle;
+        const theta = orbitControls.azimuthAngle;
+        camera.position.set(
+          lookAt.x + dist * Math.sin(phi) * Math.cos(theta),
+          lookAt.y + dist * Math.cos(phi),
+          lookAt.z + dist * Math.sin(phi) * Math.sin(theta),
+        );
+        camera.up.set(0, 1, 0);
+        camera.lookAt(lookAt);
+        camera.fov = params.fov;
+        camera.aspect = aspect;
+        camera.updateProjectionMatrix();
+      }
+
+      function applyTopDownBackground() {
+        const vfPos = vfCamera.position;
+        const floorUnderCamera = new THREE.Vector3(vfPos.x, 0, vfPos.z);
+        bgCamera.position.set(vfPos.x, vfPos.y + 2.8, vfPos.z);
+        const facing = new THREE.Vector3();
+        vfCamera.getWorldDirection(facing);
+        facing.y = 0;
+        if (facing.lengthSq() > 1e-6) bgCamera.up.copy(facing.normalize());
+        else bgCamera.up.set(0, 0, -1);
+        bgCamera.lookAt(floorUnderCamera);
+        bgCamera.fov = 65;
+        bgCamera.aspect = innerWidth / innerHeight;
+        bgCamera.near = 0.1;
+        bgCamera.far = 10000;
+        bgCamera.updateProjectionMatrix();
+      }
+
+      function applyFrameParamsToSearch(sp, frame, { includeViewerPrefs = true } = {}) {
+        sp.set('scene', frame.sceneUrl);
+        if (frame.targetUrl) sp.set('target', frame.targetUrl);
+        else sp.delete('target');
+        sp.set('targetPosition', fmtVec3(arrToVec3(frame.targetPosition)));
+        sp.set('targetScale', fmtScale(arrToVec3(frame.targetScale, [1, 1, 1])));
+        sp.set('targetRotation', fmtVec3(arrToVec3(frame.targetRotation)));
+        sp.set('cameraPosition', fmtVec3(arrToVec3(frame.cameraPosition, [0, 5, 10])));
+        sp.set('fov', String(frame.fov));
+        sp.set('shadows', frame.shadows ? '1' : '0');
+        if (includeViewerPrefs) {
+          sp.set('zoom', params.zoomMode);
+          sp.set('guide', guidesVisible ? '1' : '0');
+        }
+        sp.delete('allowMapControls');
+        sp.delete('mapControls');
+        sp.delete('position');
+        sp.delete('scale');
+        sp.delete('rotation');
+        sp.delete('camera');
+      }
+
+      function liveFrameForShare() {
+        const targetPosition = target ? vec3ToArr(target.position) : vec3ToArr(params.targetPosition);
+        const targetScale = target ? vec3ToArr(target.scale) : vec3ToArr(params.targetScale, [1, 1, 1]);
+        const targetRotation = target
+          ? [target.rotation.x, target.rotation.y, target.rotation.z]
+          : vec3ToArr(params.targetRotation);
+        return {
+          sceneUrl: params.sceneUrl,
+          targetUrl: params.targetUrl,
+          targetPosition,
+          targetScale,
+          targetRotation,
+          cameraPosition: vec3ToArr(canonicalCameraPosition()),
+          fov: params.fov,
+          shadows: params.shadows,
+        };
+      }
+
+      function buildShareUrl() {
+        const url = new URL(window.location.href);
+        url.search = '';
+        applyFrameParamsToSearch(url.searchParams, liveFrameForShare());
+        return url.toString();
+      }
+
+      function writeUrlFromState() {
+        const url = new URL(window.location.href);
+        const sp = url.searchParams;
+        const kf = keyframes[selectedIndex];
+        applyFrameParamsToSearch(sp, kf);
+        // Keep multi-keyframe editor state in the address bar; single-frame stays short.
+        if (keyframes.length > 1) {
+          sp.set('kf', String(selectedIndex));
+          sp.set('keyframes', JSON.stringify(keyframes));
+        } else {
+          sp.delete('kf');
+          sp.delete('keyframes');
+        }
+        window.history.replaceState({}, '', url.toString());
+      }
+
+      let shareResetTimer = 0;
+      async function copyShareUrl() {
+        const shareUrl = buildShareUrl();
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          viewShareBtn.textContent = 'Copied!';
+          viewShareBtn.title = 'Link copied';
+        } catch {
+          // Fallback for restricted clipboard contexts
+          window.prompt('Copy this share link:', shareUrl);
+          viewShareBtn.textContent = 'Share';
+          viewShareBtn.title = 'Copy share link for this frame';
+          return;
+        }
+        clearTimeout(shareResetTimer);
+        shareResetTimer = setTimeout(() => {
+          viewShareBtn.textContent = 'Share';
+          viewShareBtn.title = 'Copy share link for this frame';
+        }, 1600);
+      }
+
+      function syncFormFromKeyframe(kf) {
+        const f = settingsForm.elements;
+        f.duration.value = String(kf.duration);
+        f.easing.value = kf.easing;
+        f.scene.value = kf.sceneUrl;
+        f.target.value = kf.targetUrl;
+        syncPresetSelect(f.scenePreset, kf.sceneUrl, SCENE_PRESETS);
+        syncPresetSelect(f.targetPreset, kf.targetUrl, OBJECT_PRESETS);
+        f.targetPosition.value = fmtVec3(arrToVec3(kf.targetPosition));
+        f.targetScale.value = fmtScale(arrToVec3(kf.targetScale, [1, 1, 1]));
+        f.targetRotation.value = fmtVec3(arrToVec3(kf.targetRotation));
+        f.cameraPosition.value = fmtVec3(arrToVec3(kf.cameraPosition, [0, 5, 10]));
+        f.fov.value = String(kf.fov);
+        f.shadows.checked = kf.shadows;
+        kfLabel.textContent = `Keyframe ${selectedIndex + 1} of ${keyframes.length}`;
+        kfDelBtn.disabled = keyframes.length <= 1 || playback.playing;
+        kfAddBtn.disabled = playback.playing;
+        kfUpdateBtn.disabled = !cameraDirty || playback.playing;
+        kfUpdateBtn.classList.toggle('dirty', cameraDirty && !playback.playing);
+        syncTransportButtons();
+      }
+
+      function syncTransportButtons() {
+        const playing = playback.playing;
+        const label = playing ? '❚❚' : '▶';
+        const title = playing ? 'Pause' : 'Play';
+        kfPlayBtn.textContent = label;
+        kfPlayBtn.title = title;
+        viewPlayBtn.textContent = label;
+        viewPlayBtn.title = title;
+        viewPlayBtn.setAttribute('aria-label', playing ? 'Pause keyframes' : 'Play keyframes');
+      }
+
+      function renderTimeline() {
+        const total = Math.max(totalDuration(keyframes), 0.0001);
+        const starts = keyframeStartTimes(keyframes);
+        timelineTrack.querySelectorAll('.timeline-segment, .timeline-kf').forEach((el) => el.remove());
+
+        for (let i = 0; i < keyframes.length; i++) {
+          const dur = Math.max(0, keyframes[i].duration);
+          if (dur > 0) {
+            const seg = document.createElement('div');
+            seg.className = 'timeline-segment';
+            seg.style.left = `${(starts[i] / total) * 100}%`;
+            seg.style.width = `${(dur / total) * 100}%`;
+            timelineTrack.insertBefore(seg, timelinePlayhead);
+          }
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `timeline-kf${i === selectedIndex ? ' active' : ''}`;
+          btn.dataset.gaId = 'timeline-kf';
+          btn.dataset.kfIndex = String(i);
+          btn.style.left = `${(starts[i] / total) * 100}%`;
+          btn.title = `Keyframe ${i + 1}`;
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectKeyframe(i);
+          });
+          timelineTrack.appendChild(btn);
+        }
+
+        const t = playback.playing || playback.time > 0 ? playback.time : starts[selectedIndex];
+        timelinePlayhead.classList.toggle('visible', playback.playing || playback.time > 0);
+        timelinePlayhead.style.left = `${(THREE.MathUtils.clamp(t, 0, total) / total) * 100}%`;
+        timelineTime.textContent = `${t.toFixed(1)} / ${total.toFixed(1)}s`;
+      }
+
+      function sampleAtTime(time) {
+        const kfs = keyframes;
+        if (kfs.length === 1) {
+          return { pose: kfs[0], discreteIndex: 0, from: kfs[0], to: kfs[0], u: 1 };
+        }
+
+        // KF0 duration = hold at KF0; KF[i] duration = transition from i-1 → i
+        let t = Math.max(0, time);
+        const hold = Math.max(0, kfs[0].duration);
+        if (t <= hold) {
+          return { pose: kfs[0], discreteIndex: 0, from: kfs[0], to: kfs[0], u: 0 };
+        }
+        t -= hold;
+
+        for (let i = 1; i < kfs.length; i++) {
+          const dur = Math.max(0, kfs[i].duration);
+          if (dur <= 1e-6) {
+            // Instant keyframe — snap through; if no time remains, land here
+            if (t <= 1e-8) {
+              return { pose: kfs[i], discreteIndex: i, from: kfs[i - 1], to: kfs[i], u: 1 };
+            }
+            continue;
+          }
+          if (t < dur || i === kfs.length - 1) {
+            const u = applyEasing(Math.min(t, dur) / dur, kfs[i].easing);
+            return {
+              pose: null,
+              discreteIndex: i,
+              from: kfs[i - 1],
+              to: kfs[i],
+              u,
+            };
+          }
+          t -= dur;
+        }
+
+        const last = kfs[kfs.length - 1];
+        return { pose: last, discreteIndex: kfs.length - 1, from: last, to: last, u: 1 };
+      }
+
+      function lerpPose(from, to, u) {
+        const camA = arrToVec3(from.cameraPosition, [0, 5, 10]);
+        const camB = arrToVec3(to.cameraPosition, [0, 5, 10]);
+
+        // Prefer spherical orbit lerp when both sides have orbit data
+        const aOrb = from.orbit;
+        const bOrb = to.orbit;
+        let orbit;
+        if (
+          aOrb && bOrb
+          && Number.isFinite(aOrb.distance) && Number.isFinite(bOrb.distance)
+          && Number.isFinite(aOrb.azimuthAngle) && Number.isFinite(bOrb.azimuthAngle)
+          && Number.isFinite(aOrb.polarAngle) && Number.isFinite(bOrb.polarAngle)
+        ) {
+          orbit = {
+            distance: lerp(aOrb.distance, bOrb.distance, u),
+            azimuthAngle: lerpAngle(aOrb.azimuthAngle, bOrb.azimuthAngle, u),
+            polarAngle: lerp(aOrb.polarAngle, bOrb.polarAngle, u),
+          };
+        } else {
+          orbit = null;
+        }
+
+        return {
+          sceneUrl: u < 1 ? from.sceneUrl : to.sceneUrl,
+          targetUrl: u < 1 ? from.targetUrl : to.targetUrl,
+          targetPosition: [
+            lerp(from.targetPosition[0], to.targetPosition[0], u),
+            lerp(from.targetPosition[1], to.targetPosition[1], u),
+            lerp(from.targetPosition[2], to.targetPosition[2], u),
+          ],
+          targetScale: [
+            lerp(from.targetScale[0], to.targetScale[0], u),
+            lerp(from.targetScale[1], to.targetScale[1], u),
+            lerp(from.targetScale[2], to.targetScale[2], u),
+          ],
+          targetRotation: [
+            lerp(from.targetRotation[0], to.targetRotation[0], u),
+            lerp(from.targetRotation[1], to.targetRotation[1], u),
+            lerp(from.targetRotation[2], to.targetRotation[2], u),
+          ],
+          cameraPosition: [
+            lerp(camA.x, camB.x, u),
+            lerp(camA.y, camB.y, u),
+            lerp(camA.z, camB.z, u),
+          ],
+          orbit,
+          fov: lerp(from.fov, to.fov, u),
+          shadows: u < 1 ? from.shadows : to.shadows,
+          duration: to.duration,
+          easing: to.easing,
+        };
+      }
+
+      async function applyDiscreteAssets(kf) {
+        const sceneChanged = kf.sceneUrl !== loadedSceneUrl;
+        const targetChanged = kf.targetUrl !== loadedTargetUrl;
+        if (sceneChanged) await ensureSceneLoaded(kf.sceneUrl);
+        if (targetChanged || sceneChanged) await ensureTargetLoaded(kf.targetUrl);
+      }
+
+      function applyPoseToLive(pose, { updateOrbit = true } = {}) {
+        params.sceneUrl = pose.sceneUrl;
+        params.targetUrl = pose.targetUrl;
+        params.targetPosition = arrToVec3(pose.targetPosition);
+        params.targetScale = arrToVec3(pose.targetScale, [1, 1, 1]);
+        params.targetRotation = arrToVec3(pose.targetRotation);
+        params.cameraPosition = arrToVec3(pose.cameraPosition, [0, 5, 10]);
+        params.fov = pose.fov;
+        const shadowsChanged = params.shadows !== pose.shadows;
+        params.shadows = pose.shadows;
+
+        if (updateOrbit) {
+          if (
+            pose.orbit
+            && Number.isFinite(pose.orbit.distance)
+            && Number.isFinite(pose.orbit.azimuthAngle)
+            && Number.isFinite(pose.orbit.polarAngle)
+          ) {
+            orbitControls.distance = pose.orbit.distance;
+            orbitControls.azimuthAngle = pose.orbit.azimuthAngle;
+            orbitControls.polarAngle = pose.orbit.polarAngle;
+          } else {
+            setOrbitFromPositions(orbitControls, params.cameraPosition, lookAtPoint());
+          }
+        }
+
+        applyTargetTransformFromParams();
+        if (shadowsChanged) applyShadowsSetting();
+      }
+
+      let applyGen = 0;
+      async function applyTimelineTime(time) {
+        const gen = ++applyGen;
+        const sample = sampleAtTime(time);
+        const pose = sample.pose || lerpPose(sample.from, sample.to, sample.u);
+
+        // Snap non-animatable URLs when entering a keyframe segment
+        if (sample.discreteIndex !== playback.lastDiscreteIndex) {
+          playback.lastDiscreteIndex = sample.discreteIndex;
+          const snapKf = keyframes[sample.discreteIndex];
+          await applyDiscreteAssets(snapKf);
+          if (gen !== applyGen) return;
+          params.sceneUrl = snapKf.sceneUrl;
+          params.targetUrl = snapKf.targetUrl;
+        }
+
+        if (gen !== applyGen) return;
+        applyPoseToLive(pose);
+        renderTimeline();
+      }
+
+      async function selectKeyframe(index) {
+        if (playback.playing) stopPlayback();
+        selectedIndex = THREE.MathUtils.clamp(index, 0, keyframes.length - 1);
+        const kf = keyframes[selectedIndex];
+        playback.time = keyframeStartTimes(keyframes)[selectedIndex];
+        playback.lastDiscreteIndex = -1;
+        setCameraDirty(false);
+        await applyDiscreteAssets(kf);
+        applyOrbitFromKeyframe(kf);
+        applyPoseToLive(kf);
+        syncFormFromKeyframe(kf);
+        syncModeBundle();
+        writeUrlFromState();
+        renderTimeline();
+      }
+
+      function readFormIntoKeyframe(kf) {
+        const f = settingsForm.elements;
+        kf.duration = Math.max(0, Number(f.duration.value) || 0);
+        kf.easing = EASINGS.has(f.easing.value) ? f.easing.value : 'linear';
+        kf.sceneUrl = f.scene.value.trim() || './scenes/studio.json';
+        kf.targetUrl = f.target.value.trim();
+        kf.targetPosition = vec3ToArr(parseVec3(f.targetPosition.value));
+        kf.targetScale = vec3ToArr(parseScale(f.targetScale.value));
+        kf.targetRotation = vec3ToArr(parseVec3(f.targetRotation.value));
+        kf.cameraPosition = vec3ToArr(parseVec3(f.cameraPosition.value, [0, 5, 10]));
+        kf.fov = THREE.MathUtils.clamp(Number(f.fov.value) || 50, 10, 120);
+        kf.shadows = !!f.shadows.checked;
+      }
+
+      function captureLiveIntoSelectedKeyframe() {
+        const kf = keyframes[selectedIndex];
+        kf.targetPosition = target
+          ? vec3ToArr(target.position)
+          : vec3ToArr(params.targetPosition);
+        kf.targetScale = target
+          ? vec3ToArr(target.scale)
+          : vec3ToArr(params.targetScale);
+        if (target) {
+          kf.targetRotation = [target.rotation.x, target.rotation.y, target.rotation.z];
+        } else {
+          kf.targetRotation = vec3ToArr(params.targetRotation);
+        }
+        captureOrbitIntoKeyframe(kf);
+        kf.fov = params.fov;
+        kf.shadows = params.shadows;
+        kf.sceneUrl = params.sceneUrl;
+        kf.targetUrl = params.targetUrl;
+      }
+
+      function startPlayback() {
+        if (exportJob.active || keyframes.length < 1) return;
+        setCameraDirty(false);
+        // Ensure orbit data exists on all keyframes for smooth camera paths
+        for (const kf of keyframes) {
+          if (!kf.orbit || !Number.isFinite(kf.orbit.distance)) {
+            const lookAt = lookAtPoint();
+            const tmp = {
+              distance: 5,
+              azimuthAngle: 0,
+              polarAngle: Math.PI / 4,
+            };
+            setOrbitFromPositions(tmp, arrToVec3(kf.cameraPosition, [0, 5, 10]), lookAt);
+            kf.orbit = {
+              distance: tmp.distance,
+              azimuthAngle: tmp.azimuthAngle,
+              polarAngle: tmp.polarAngle,
+            };
+          }
+        }
+        playback.playing = true;
+        playback.lastTs = performance.now();
+        if (playback.time >= totalDuration(keyframes)) playback.time = 0;
+        playback.lastDiscreteIndex = -1;
+        orbitControls.enabled = false;
+        kfAddBtn.disabled = true;
+        kfDelBtn.disabled = true;
+        syncTransportButtons();
+        renderTimeline();
+      }
+
+      function pausePlayback() {
+        playback.playing = false;
+        orbitControls.enabled = true;
+        kfAddBtn.disabled = false;
+        kfDelBtn.disabled = keyframes.length <= 1;
+        // Snap selection to nearest keyframe at current time
+        const starts = keyframeStartTimes(keyframes);
+        let nearest = 0;
+        let best = Infinity;
+        for (let i = 0; i < starts.length; i++) {
+          const d = Math.abs(starts[i] - playback.time);
+          if (d < best) {
+            best = d;
+            nearest = i;
+          }
+        }
+        selectedIndex = nearest;
+        syncFormFromKeyframe(keyframes[selectedIndex]);
+        writeUrlFromState();
+        renderTimeline();
+      }
+
+      function stopPlayback() {
+        playback.playing = false;
+        playback.time = 0;
+        playback.lastDiscreteIndex = -1;
+        orbitControls.enabled = true;
+        kfAddBtn.disabled = false;
+        kfDelBtn.disabled = keyframes.length <= 1;
+        syncTransportButtons();
+      }
+
+      function togglePlayback() {
+        if (exportJob.active) return;
+        if (playback.playing) pausePlayback();
+        else startPlayback();
+      }
+
+      function populateExportResolutions() {
+        const aspect = exportAspectEl.value;
+        const prev = exportResolutionEl.value;
+        exportResolutionEl.replaceChildren();
+        for (const shortEdge of EXPORT_SHORT_EDGES) {
+          const { width, height } = exportSizeFor(aspect, shortEdge);
+          const opt = document.createElement('option');
+          opt.value = String(shortEdge);
+          opt.textContent = `${width}×${height}`;
+          exportResolutionEl.appendChild(opt);
+        }
+        if ([...exportResolutionEl.options].some((o) => o.value === prev)) {
+          exportResolutionEl.value = prev;
+        } else {
+          exportResolutionEl.value = '1080';
+        }
+      }
+
+      function updateExportSummary() {
+        const total = totalDuration(keyframes);
+        const fps = Number(exportFpsEl.value) || 30;
+        const frames = Math.max(1, Math.ceil(total * fps) + 1);
+        const shortEdge = Number(exportResolutionEl.value) || 1080;
+        const { width, height } = exportSizeFor(exportAspectEl.value, shortEdge);
+        exportSummaryEl.textContent =
+          `${total.toFixed(1)}s · ${frames} frames · ${width}×${height} @ ${fps} fps · WebM`;
+      }
+
+      function setExportFormBusy(busy) {
+        exportAspectEl.disabled = busy;
+        exportResolutionEl.disabled = busy;
+        exportFpsEl.disabled = busy;
+        exportStartBtn.disabled = busy;
+        exportStartBtn.textContent = busy ? 'Exporting…' : 'Export';
+        exportCancelBtn.textContent = busy ? 'Abort' : 'Cancel';
+        exportProgressWrap.classList.toggle('visible', busy);
+      }
+
+      function setExportProgress(done, total, label) {
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        exportProgressBar.style.width = `${pct}%`;
+        exportStatusEl.textContent = label || `${done} / ${total} frames (${pct}%)`;
+      }
+
+      function openExportModal() {
+        if (exportJob.active) return;
+        populateExportResolutions();
+        updateExportSummary();
+        setExportFormBusy(false);
+        setExportProgress(0, 1, 'Ready');
+        exportModal.hidden = false;
+        exportModal.classList.add('open');
+      }
+
+      function closeExportModal() {
+        if (exportJob.active) {
+          exportJob.cancelRequested = true;
+          return;
+        }
+        exportModal.classList.remove('open');
+        exportModal.hidden = true;
+        setExportFormBusy(false);
+      }
+
+      function restoreRendererAfterExport() {
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.domElement.style.width = '';
+        renderer.domElement.style.height = '';
+        if (params.zoomMode === 'camera') {
+          layoutSharpViewfinder(vfRenderer);
+          applyViewfinderOrbit();
+          applyTopDownBackground();
+        } else {
+          applyFullscreenFit();
+        }
+      }
+
+      async function runVideoExport() {
+        if (exportJob.active) return;
+        const mimeType = pickWebmMimeType();
+        if (!mimeType) {
+          showError(new Error('WebM export is not supported in this browser.'));
+          return;
+        }
+
+        const fps = Number(exportFpsEl.value) || 30;
+        const shortEdge = Number(exportResolutionEl.value) || 1080;
+        const { width, height } = exportSizeFor(exportAspectEl.value, shortEdge);
+        const total = totalDuration(keyframes);
+        const frameCount = Math.max(1, Math.ceil(total * fps) + 1);
+        const bitrate = Math.round(8_000_000 * ((width * height) / (1920 * 1080)));
+
+        if (playback.playing) pausePlayback();
+
+        // Ensure orbit data exists for smooth paths (same as startPlayback)
+        for (const kf of keyframes) {
+          if (!kf.orbit || !Number.isFinite(kf.orbit.distance)) {
+            const lookAt = lookAtPoint();
+            const tmp = {
+              distance: 5,
+              azimuthAngle: 0,
+              polarAngle: Math.PI / 4,
+            };
+            setOrbitFromPositions(tmp, arrToVec3(kf.cameraPosition, [0, 5, 10]), lookAt);
+            kf.orbit = {
+              distance: tmp.distance,
+              azimuthAngle: tmp.azimuthAngle,
+              polarAngle: tmp.polarAngle,
+            };
+          }
+        }
+
+        exportJob.active = true;
+        exportJob.cancelRequested = false;
+        orbitControls.enabled = false;
+        setExportFormBusy(true);
+        setExportProgress(0, frameCount, `Preparing ${width}×${height}…`);
+
+        const prevTime = playback.time;
+        const prevDiscrete = playback.lastDiscreteIndex;
+        playback.lastDiscreteIndex = -1;
+
+        let recorder = null;
+        let stream = null;
+        const chunks = [];
+
+        try {
+          renderer.setPixelRatio(1);
+          renderer.setSize(width, height, false);
+          renderer.domElement.style.width = `${width}px`;
+          renderer.domElement.style.height = `${height}px`;
+
+          stream = renderer.domElement.captureStream(0);
+          const track = stream.getVideoTracks()[0];
+          recorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: Math.max(2_000_000, bitrate),
+          });
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunks.push(e.data);
+          };
+
+          const stopped = new Promise((resolve, reject) => {
+            recorder.onstop = () => resolve();
+            recorder.onerror = () => reject(recorder.error || new Error('MediaRecorder failed'));
+          });
+
+          // MediaRecorder stamps frames by wall-clock time. Pace capture at 1/fps
+          // so playback duration matches the timeline (still seeking offline, not by dt).
+          const frameDurationMs = 1000 / fps;
+          recorder.start(100);
+          await nextAnimationFrame();
+          let nextFrameDue = performance.now();
+
+          for (let i = 0; i < frameCount; i++) {
+            if (exportJob.cancelRequested) throw new Error('Export cancelled');
+
+            const t = Math.min(i / fps, total);
+            playback.time = t;
+            await applyTimelineTime(t);
+            applyCameraForAspect(width / height);
+            renderer.render(scene, camera);
+            if (typeof track.requestFrame === 'function') track.requestFrame();
+
+            setExportProgress(i + 1, frameCount, `Rendering ${i + 1} / ${frameCount}`);
+
+            nextFrameDue += frameDurationMs;
+            const wait = nextFrameDue - performance.now();
+            if (wait > 0) await waitMs(wait);
+            else await nextAnimationFrame();
+          }
+
+          // Hold the last frame for a full frame interval before stopping.
+          await waitMs(frameDurationMs);
+
+          setExportProgress(frameCount, frameCount, 'Finalizing…');
+          recorder.stop();
+          await stopped;
+
+          if (exportJob.cancelRequested) throw new Error('Export cancelled');
+
+          const blob = new Blob(chunks, { type: mimeType.split(';')[0] || 'video/webm' });
+          if (!blob.size) throw new Error('Export produced an empty file');
+          downloadBlob(blob, 'scene-export.webm');
+          exportStatusEl.textContent = 'Done — download started';
+        } catch (err) {
+          if (recorder && recorder.state !== 'inactive') {
+            try { recorder.stop(); } catch { /* ignore */ }
+          }
+          if (String(err?.message || err) !== 'Export cancelled') {
+            showError(err);
+            exportStatusEl.textContent = 'Export failed';
+          } else {
+            exportStatusEl.textContent = 'Export cancelled';
+          }
+        } finally {
+          if (stream) {
+            for (const t of stream.getTracks()) t.stop();
+          }
+          exportJob.active = false;
+          exportJob.cancelRequested = false;
+          orbitControls.enabled = !playback.playing;
+          restoreRendererAfterExport();
+          playback.time = prevTime;
+          playback.lastDiscreteIndex = -1;
+          await applyTimelineTime(prevTime);
+          playback.lastDiscreteIndex = prevDiscrete;
+          setExportFormBusy(false);
+          exportModal.classList.remove('open');
+          exportModal.hidden = true;
+          renderTimeline();
+          syncTransportButtons();
+        }
+      }
+
+      function onPointerDown(event) {
+        if (!orbitControls.enabled || playback.playing) return;
+        if (isUiEventTarget(event.target)) return;
+        event.preventDefault();
+        orbitControls.isDragging = true;
+        orbitControls.lastX = (event.clientX || event.touches?.[0]?.clientX) - innerWidth / 2;
+        orbitControls.lastY = -(event.clientY || event.touches?.[0]?.clientY) + innerHeight / 2;
+      }
+
+      function onPointerMove(event) {
+        if (!orbitControls.isDragging) return;
+        const x = (event.clientX || event.touches?.[0]?.clientX) - innerWidth / 2;
+        const y = -(event.clientY || event.touches?.[0]?.clientY) + innerHeight / 2;
+        orbitControls.azimuthAngle += (x - orbitControls.lastX) * 0.01;
+        orbitControls.polarAngle += (y - orbitControls.lastY) * 0.01;
+        orbitControls.polarAngle = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, orbitControls.polarAngle));
+        orbitControls.lastX = x;
+        orbitControls.lastY = y;
+      }
+
+      function onPointerUp() {
+        orbitControls.isDragging = false;
+      }
+
+      document.addEventListener('mousedown', onPointerDown);
+      document.addEventListener('mousemove', onPointerMove);
+      document.addEventListener('mouseup', () => {
+        if (orbitControls.enabled && orbitControls.isDragging) {
+          onPointerUp();
+          setCameraDirty(true);
+          // Preview live camera in the form without writing the keyframe yet
+          settingsForm.elements.cameraPosition.value = fmtVec3(canonicalCameraPosition());
+        }
+      });
+      document.addEventListener('touchstart', onPointerDown, { passive: false });
+      document.addEventListener('touchmove', onPointerMove, { passive: false });
+      document.addEventListener('touchend', () => {
+        if (orbitControls.enabled && orbitControls.isDragging) {
+          onPointerUp();
+          setCameraDirty(true);
+          settingsForm.elements.cameraPosition.value = fmtVec3(canonicalCameraPosition());
+        }
+      });
+
+      function onWheel(event) {
+        if (!orbitControls.enabled || playback.playing) return;
+        if (isUiEventTarget(event.target)) return;
+        event.preventDefault();
+        const factor = Math.exp(Math.sign(event.deltaY) * orbitControls.zoomSpeed);
+        orbitControls.distance = Math.max(1, Math.min(20, orbitControls.distance * factor));
+        setCameraDirty(true);
+        settingsForm.elements.cameraPosition.value = fmtVec3(canonicalCameraPosition());
+      }
+      document.addEventListener('wheel', onWheel, { passive: false });
+
+      fillPresetSelect(settingsForm.elements.scenePreset, SCENE_PRESETS, {
+        emptyLabel: 'Custom…',
+      });
+      fillPresetSelect(settingsForm.elements.targetPreset, OBJECT_PRESETS, {
+        emptyLabel: 'None',
+      });
+
+      // ---- boot scene from selected keyframe ----
+      await ensureSceneLoaded(params.sceneUrl);
+      await ensureTargetLoaded(params.targetUrl);
+      applyOrbitFromKeyframe(keyframes[selectedIndex]);
+      applyPoseToLive(keyframes[selectedIndex]);
+      applyShadowsSetting();
+      syncModeBundle();
+      setCameraDirty(false);
+      syncFormFromKeyframe(keyframes[selectedIndex]);
+      writeUrlFromState();
+      renderTimeline();
+
+      panelToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setPanelOpen(!settingsPanel.classList.contains('open'));
+      });
+
+      kfPlayBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePlayback();
+      });
+      kfStopBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        stopPlayback();
+        await selectKeyframe(0);
+      });
+      viewPlayBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePlayback();
+      });
+      viewStopBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        stopPlayback();
+        await selectKeyframe(0);
+      });
+      kfUpdateBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!cameraDirty || playback.playing) return;
+        captureLiveIntoSelectedKeyframe();
+        setCameraDirty(false);
+        syncFormFromKeyframe(keyframes[selectedIndex]);
+        writeUrlFromState();
+        renderTimeline();
+      });
+
+      kfGuideBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setGuidesVisible(!guidesVisible, { writeUrl: true });
+      });
+
+      viewShareBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copyShareUrl();
+      });
+
+      viewExportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openExportModal();
+      });
+      exportAspectEl.addEventListener('change', () => {
+        populateExportResolutions();
+        updateExportSummary();
+      });
+      exportResolutionEl.addEventListener('change', updateExportSummary);
+      exportFpsEl.addEventListener('change', updateExportSummary);
+      exportForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        runVideoExport();
+      });
+      exportCancelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeExportModal();
+      });
+      exportModal.addEventListener('click', (e) => {
+        if (e.target === exportModal && !exportJob.active) closeExportModal();
+      });
+
+      kfAddBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (playback.playing) return;
+        // New keyframe starts from the selected KF's recorded pose (not unsaved orbit)
+        const copy = cloneKeyframe(keyframes[selectedIndex]);
+        copy.duration = 2;
+        copy.easing = 'ease-in';
+        keyframes.splice(selectedIndex + 1, 0, copy);
+        selectedIndex += 1;
+        setCameraDirty(false);
+        syncFormFromKeyframe(keyframes[selectedIndex]);
+        writeUrlFromState();
+        renderTimeline();
+      });
+      kfDelBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (playback.playing || keyframes.length <= 1) return;
+        keyframes.splice(selectedIndex, 1);
+        selectedIndex = Math.min(selectedIndex, keyframes.length - 1);
+        await selectKeyframe(selectedIndex);
+      });
+
+      settingsForm.addEventListener('submit', (e) => e.preventDefault());
+
+      settingsForm.addEventListener('change', async (e) => {
+        if (playback.playing) return;
+        const f = settingsForm.elements;
+        const changed = e.target?.name;
+
+        // Preset selects write into the URL fields; Custom / unmatched leaves them alone
+        // except Object "None", which clears the target URL.
+        if (changed === 'scenePreset') {
+          if (f.scenePreset.value) f.scene.value = f.scenePreset.value;
+        } else if (changed === 'targetPreset') {
+          const preset = f.targetPreset.value;
+          const isCustom = f.targetPreset.selectedOptions[0]?.dataset?.custom === '1';
+          if (!isCustom) f.target.value = preset;
+        } else if (changed === 'scene') {
+          syncPresetSelect(f.scenePreset, f.scene.value, SCENE_PRESETS);
+        } else if (changed === 'target') {
+          syncPresetSelect(f.targetPreset, f.target.value, OBJECT_PRESETS);
+        }
+
+        const kf = keyframes[selectedIndex];
+        const prevScene = kf.sceneUrl;
+        const prevTarget = kf.targetUrl;
+        readFormIntoKeyframe(kf);
+
+        // Re-seed orbit from camera position field
+        setOrbitFromPositions(
+          orbitControls,
+          arrToVec3(kf.cameraPosition, [0, 5, 10]),
+          lookAtPoint(),
+        );
+        captureOrbitIntoKeyframe(kf);
+
+        params.sceneUrl = kf.sceneUrl;
+        params.targetUrl = kf.targetUrl;
+        params.targetPosition = arrToVec3(kf.targetPosition);
+        params.targetScale = arrToVec3(kf.targetScale, [1, 1, 1]);
+        params.targetRotation = arrToVec3(kf.targetRotation);
+        params.fov = kf.fov;
+        params.shadows = kf.shadows;
+
+        if (kf.sceneUrl !== prevScene || kf.targetUrl !== prevTarget) {
+          await applyDiscreteAssets(kf);
+        }
+        applyTargetTransformFromParams();
+        applyShadowsSetting();
+        writeUrlFromState();
+        renderTimeline();
+        syncFormFromKeyframe(kf);
+      });
+
+      settingsForm.elements.fov.addEventListener('input', () => {
+        if (playback.playing) return;
+        const fov = THREE.MathUtils.clamp(Number(settingsForm.elements.fov.value) || 50, 10, 120);
+        params.fov = fov;
+        keyframes[selectedIndex].fov = fov;
+      });
+
+      settingsForm.elements.duration.addEventListener('input', () => {
+        if (playback.playing) return;
+        keyframes[selectedIndex].duration = Math.max(0, Number(settingsForm.elements.duration.value) || 0);
+        renderTimeline();
+      });
+
+      modeToggle.addEventListener('click', () => {
+        const enteringCamera = params.zoomMode !== 'camera';
+        params.zoomMode = enteringCamera ? 'camera' : 'fullscreen';
+        // Leaving camera view while playing is fine — stay in fullscreen and keep playing
+        syncModeBundle();
+        syncFormFromKeyframe(keyframes[selectedIndex]);
+        writeUrlFromState();
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (exportJob.active || exportModal.classList.contains('open')) {
+            closeExportModal();
+            return;
+          }
+          if (playback.playing) {
+            pausePlayback();
+            return;
+          }
+          if (settingsPanel.classList.contains('open')) {
+            setPanelOpen(false);
+            return;
+          }
+          params.zoomMode = params.zoomMode === 'camera' ? 'fullscreen' : 'camera';
+          syncModeBundle();
+          syncFormFromKeyframe(keyframes[selectedIndex]);
+          writeUrlFromState();
+        }
+        if (event.key === ' ' && !isUiEventTarget(event.target) && !exportJob.active) {
+          event.preventDefault();
+          togglePlayback();
+        }
+      });
+
+      addEventListener('resize', () => {
+        if (exportJob.active) return;
+        renderer.setSize(innerWidth, innerHeight);
+        if (params.zoomMode === 'camera') {
+          layoutSharpViewfinder(vfRenderer);
+          applyViewfinderOrbit();
+          applyTopDownBackground();
+        } else {
+          applyFullscreenFit();
+        }
+      });
+
+      (function animate(now) {
+        requestAnimationFrame(animate);
+
+        if (exportJob.active) return;
+
+        if (playback.playing) {
+          const dt = Math.min(0.1, (now - playback.lastTs) / 1000);
+          playback.lastTs = now;
+          playback.time += dt;
+          const total = totalDuration(keyframes);
+          if (playback.time >= total) {
+            playback.time = total;
+            applyTimelineTime(playback.time);
+            pausePlayback();
+            selectedIndex = keyframes.length - 1;
+            syncFormFromKeyframe(keyframes[selectedIndex]);
+            writeUrlFromState();
+          } else {
+            applyTimelineTime(playback.time);
+          }
+        }
+
+        if (params.zoomMode === 'camera') {
+          applyViewfinderOrbit();
+          applyTopDownBackground();
+          renderer.render(scene, bgCamera);
+          vfRenderer.render(scene, vfCamera);
+        } else {
+          applyFullscreenFit();
+          renderer.render(scene, camera);
+        }
+      })(performance.now());
+    }
+
+    init().catch(showError);
+  </script>
+</body>
+</html>
